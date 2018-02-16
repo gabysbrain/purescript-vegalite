@@ -1,0 +1,33 @@
+{
+  "name": "purescript-vegalite",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "output"
+  ],
+  "dependencies": {
+    "purescript-prelude": "^3.1.1",
+    "purescript-console": "^3.0.0",
+    "purescript-tuples": "^4.1.0",
+    "purescript-sets": "^3.1.0",
+    "purescript-maybe": "^3.0.0",
+    "purescript-lists": "^4.12.0",
+    "purescript-transformers": "^3.5.0",
+    "purescript-nonempty": "^4.1.1",
+    "purescript-argonaut": "^3.1.0"
+  },
+  "devDependencies": {
+    "purescript-psci-support": "^3.0.0",
+    "purescript-spec": "^2.0.0",
+    "purescript-spec-discovery": "^2.0.0",
+    "purescript-spec-reporter-xunit": "^0.4.0",
+    "purescript-spec-quickcheck": "^2.0.0"
+  },
+  "resolutions": {
+    "purescript-spec": "^2.0.0",
+    "purescript-aff": "^4.0.0",
+    "purescript-pipes": "^5.0.0",
+    "purescript-io": "^5.0.0"
+  }
+}

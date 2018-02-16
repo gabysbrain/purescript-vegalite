@@ -1,0 +1,20 @@
+version: 2
+
+jobs: 
+  build:
+    docker:
+      - image: circleci/node:latest
+
+    steps:
+      - checkout
+      - run: npm install
+      - run: npm test
+      - run: 
+          name: Save test results
+          command: |
+            mkdir -p ~/test_results
+            cp output/test.xml ~/test_results/
+          when: always
+      - store_test_results:
+          path: ~/test_results
+

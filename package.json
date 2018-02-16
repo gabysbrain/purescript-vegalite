@@ -1,0 +1,32 @@
+{
+  "name": "purescript-vegalite",
+  "version": "0.0.1",
+  "description": "Vega lite in Purescript",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "bower install",
+    "test": "pulp test",
+    "watch-test": "pulp -w test",
+    "build": "pulp build",
+    "watch": "pulp -w build",
+    "start": "pulp -w server"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gabysbrain/purescript-vegalite.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/gabysbrain/purescript-vegalite/issues"
+  },
+  "homepage": "https://github.com/gabysbrain/purescript-vegalite#readme",
+  "devDependencies": {
+    "ajv": "^5.5.0",
+    "pulp": "^12.0.0"
+  },
+  "dependencies": {
+    "bower": "*",
+    "purescript": "^0.11.6"
+  }
+}
