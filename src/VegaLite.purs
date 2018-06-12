@@ -7,6 +7,7 @@ import Control.Monad.Gen ( class MonadGen
 import Control.Monad.Gen.Common (genNonEmpty, genMaybe, genTuple, genEither)
 import Control.Monad.Rec.Class (class MonadRec)
 import Data.Array as A
+import Data.Int as I
 import Data.NonEmpty (NonEmpty, (:|))
 import Data.Newtype (over)
 import Data.Argonaut (Json, class EncodeJson, encodeJson, 
@@ -34,6 +35,9 @@ derive instance newtypeNonemptyArray :: Newtype (NonemptyArray a) _
 instance encodeNonemptyArray :: (EncodeJson a) => EncodeJson (NonemptyArray a) where
   encodeJson (NonemptyArray xs) = encodeJson $ A.fromFoldable xs
 
+nea :: forall a. a -> Array a -> NonemptyArray a
+nea x xs = wrap $ x :| xs
+
 genNonemptyArray :: forall m a. MonadRec m => MonadGen m => m a -> m (NonemptyArray a)
 genNonemptyArray gen = wrap <$> (genNonEmpty gen)
 
@@ -59,13 +63,29 @@ instance encodeValue :: EncodeJson Value where
 genValue :: forall m. MonadGen m => m Value
 genValue = oneOf ((N <$> genNumber) :| [D <$> genString, S <$> genString])
 
+numValue :: Number -> Value
+numValue x = N x
+
+intValue :: Int -> Value
+intValue = numValue <<< I.toNumber
+
+strValue :: String -> Value
+strValue s = S s
+
 data View = Simple ViewPanel
+          | Layered { data :: Maybe Data
+                    , layers :: NonemptyArray ViewPanel
+                    }
 
 genView :: forall m. MonadGen m => m MarkType -> m Encoding -> m View
 genView mt e = Simple <$> genViewPanel mt e
 
 instance encodeView :: EncodeJson View where
   encodeJson (Simple p) = encodeJson p
+  encodeJson (Layered p) 
+     = maybeRecord "data" p.data
+     $ "layer" := p.layers
+    ~> jsonEmptyObject
 
 instance arbView :: Arbitrary View where
   arbitrary = genView arbitrary arbitrary
@@ -220,14 +240,16 @@ encoding = wrap
   , y2: Nothing
   }
 
---markColor :: CondMarkProp -> Encoding -> Encoding
+markColor :: CondMarkProp -> Encoding -> Encoding
+markColor c = over Encoding (\vp -> vp {color=Just c})
 --markColumn :: FacetFieldDef -> Encoding -> Encoding
 --markRow :: FacetFieldDef -> Encoding -> Encoding
 --markDetail :: FieldDef -> Encoding -> Encoding
 --markOpacity :: CondMarkProp -> Encoding -> Encoding
 --markOrder :: SortSpec -> Encoding -> Encoding
 --markShape :: CondMarkProp -> Encoding -> Encoding
---markSize :: CondMarkProp -> Encoding -> Encoding
+markSize :: CondMarkProp -> Encoding -> Encoding
+markSize s = over Encoding (\vp -> vp {size=Just s})
 --markText :: CondTextDef -> Encoding -> Encoding
 --markTooltip :: CondTextDef -> Encoding -> Encoding
 markX :: PositionDef -> Encoding -> Encoding
@@ -237,21 +259,28 @@ markY d = over Encoding (\vp -> vp {y=Just d})
 --markX2 :: FieldDef -> Encoding -> Encoding
 --markY2 :: FieldDef -> Encoding -> Encoding
 
-newtype CondMarkProp = CondMarkProp
-  { aggregate :: Maybe Aggregate
-  , bin :: Maybe BinParams
-  , condition :: Array Condition
-  , field :: Maybe String -- TODO: convert to field spec for the repeat stuff
-  , legend :: Maybe Legend
-  , scale :: Maybe Scale
-  , sort :: Maybe SortSpec
-  , timeUnit :: Maybe TimeUnit
-  , type :: DataType
-  }
-derive instance newtypeCondMarkProp :: Newtype CondMarkProp _
+data CondMarkProp 
+  = CondMarkPropField
+      { aggregate :: Maybe Aggregate
+      , bin :: Maybe BinParams
+      , condition :: Array Condition
+      , field :: Maybe String -- TODO: convert to field spec for the repeat stuff
+      , legend :: Maybe Legend
+      , scale :: Maybe Scale
+      , sort :: Maybe SortSpec
+      , timeUnit :: Maybe TimeUnit
+      , type :: DataType
+      }
+  | CondMarkPropValue
+      { condition :: Array Condition
+      , value :: Value 
+      }
+
+condMarkPropValue :: Value -> CondMarkProp
+condMarkPropValue v = CondMarkPropValue {condition:[], value: v}
 
 instance encodeCondMarkProp :: EncodeJson CondMarkProp where
-  encodeJson (CondMarkProp md)
+  encodeJson (CondMarkPropField md)
      = maybeRecord "aggregate" md.aggregate
      $ maybeRecord "bin" md.bin
      $ maybeRecord "field" md.field
@@ -262,9 +291,16 @@ instance encodeCondMarkProp :: EncodeJson CondMarkProp where
      $ arrayRecord "condition" md.condition
      $ "type" := md.type
     ~> jsonEmptyObject
+  encodeJson (CondMarkPropValue md)
+     = arrayRecord "condition" md.condition
+     $ "value" := md.value
+    ~> jsonEmptyObject
 
 genCondMarkProp :: forall m. MonadRec m => MonadGen m => m CondMarkProp
-genCondMarkProp = do
+genCondMarkProp = oneOf (genCondMarkPropField :| [genCondMarkPropValue])
+
+genCondMarkPropField :: forall m. MonadRec m => MonadGen m => m CondMarkProp
+genCondMarkPropField = do
   a <- genMaybe genAggregate
   b <- genMaybe genBinParams
   c <- genArray genCondition
@@ -274,7 +310,7 @@ genCondMarkProp = do
   srt <- genMaybe genSortSpec
   tu <- genMaybe genTimeUnit
   t <- genDataType
-  pure $ wrap
+  pure $ CondMarkPropField
     { aggregate: a
     , bin: b
     , condition: c
@@ -284,6 +320,15 @@ genCondMarkProp = do
     , sort: srt
     , timeUnit: tu
     , type: t
+    }
+
+genCondMarkPropValue :: forall m. MonadRec m => MonadGen m => m CondMarkProp
+genCondMarkPropValue = do
+  c <- genArray genCondition
+  v <- genValue
+  pure $ CondMarkPropValue
+    { condition: c
+    , value: v
     }
 
 newtype CondTextDef = CondTextDef

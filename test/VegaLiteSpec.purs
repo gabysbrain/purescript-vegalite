@@ -28,6 +28,23 @@ bg = Simple $ setData d $ viewPanel Bar encs
     markY (posAggregate Mean $ posField "precipitation" $ position Quantitative) $
     encoding
 
+bgWAvg :: View
+bgWAvg = Layered {data: Just d, layers: layers}
+  where
+  d = UrlData {url: "data/seattle-weather.csv", format: Nothing}
+  barEncs = 
+    markX (posTimeUnit Month $ posField "date"$ position Ordinal) $
+    markY (posAggregate Mean $ posField "precipitation" $ position Quantitative) $
+    encoding
+  avgEncs = 
+    markY     (posAggregate Mean $ posField "precipitation" $ position Quantitative) $
+    markSize  (condMarkPropValue $ intValue 3) $
+    markColor (condMarkPropValue $ strValue "firebrick") $
+    encoding
+  barLayer = viewPanel Bar barEncs
+  avgLayer = viewPanel Rule avgEncs
+  layers = nea barLayer [avgLayer]
+
 loadVlSchema :: forall e. Aff (fs::FS,exception::EXCEPTION | e) Json
 loadVlSchema = do
   txt <- liftEff $ readTextFile UTF8 "test/vega-lite-v2.spec.json"
@@ -51,8 +68,10 @@ spec = describe "VegaLite test cases" do
   describe "Generating full specifications" do
     it "bargraph spec" do
       compareToFile "bargraph.json" bg
-  describe "Any possible specification" do
-    it "should validate against vega-lite's schema" do
-      schema <- loadVlSchema
-      quickCheck \view -> validateSchema schema view
+    it "bargraph w/ average spec" do
+      compareToFile "bargraph2.json" bgWAvg
+  {--describe "Any possible specification" do--}
+    {--it "should validate against vega-lite's schema" do--}
+      {--schema <- loadVlSchema--}
+      {--quickCheck \view -> validateSchema schema view--}
 
