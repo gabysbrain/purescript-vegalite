@@ -8,6 +8,7 @@ import Control.Monad.Gen.Common (genNonEmpty, genMaybe, genTuple, genEither)
 import Control.Monad.Rec.Class (class MonadRec)
 import Data.Array as A
 import Data.Int as I
+import Data.Either as E
 import Data.NonEmpty (NonEmpty, (:|))
 import Data.Newtype (over)
 import Data.Argonaut (Json, class EncodeJson, encodeJson, 
@@ -49,6 +50,12 @@ arrayRecord :: forall a. EncodeJson a => String -> Array a -> Json -> Json
 arrayRecord k arr json = if A.null arr
                             then json
                             else k := arr ~> json
+
+arrayOr1Record :: forall a. EncodeJson a => String -> Array a -> Json -> Json
+arrayOr1Record k arr json = case A.uncons arr of
+  Just {head: x, tail: xs} | A.null xs -> k := x ~> json
+  Just {head: x, tail: xs} -> k := arr ~> json
+  Nothing -> json
 
 -- TODO: not sure this is needed
 data Value = N Number
@@ -95,6 +102,7 @@ newtype ViewPanel = ViewPanel
   , encoding :: Encoding
   , markType :: MarkType
   , selection :: Maybe Selection
+  , transform :: Array Transform
   }
 derive instance newtypeViewPanel :: Newtype ViewPanel _
 
@@ -102,18 +110,25 @@ instance encodeViewPanel :: EncodeJson ViewPanel where
   encodeJson (ViewPanel vp)
      = maybeRecord "data" vp.data
      $ maybeRecord "selection" vp.selection
+     $ arrayRecord "transform" vp.transform
      $ "encoding" := vp.encoding
     ~> "mark" := vp.markType
     ~> jsonEmptyObject
 
 viewPanel :: MarkType -> Encoding -> ViewPanel
-viewPanel m e = wrap {data:Nothing, encoding:e, markType:m, selection:Nothing}
+viewPanel m e = wrap {data:Nothing, encoding:e, markType:m, selection:Nothing, transform:[]}
 
 genViewPanel :: forall m. MonadGen m => m MarkType -> m Encoding -> m ViewPanel
 genViewPanel mt e = viewPanel <$> mt <*> e
 
 setData :: Data -> ViewPanel -> ViewPanel
 setData d = over ViewPanel (\vp -> vp {data=Just d})
+
+setSelection :: Selection -> ViewPanel -> ViewPanel
+setSelection s = over ViewPanel (\vp -> vp {selection=Just s})
+
+setTransforms :: Array Transform -> ViewPanel -> ViewPanel
+setTransforms ts = over ViewPanel (\vp -> vp {transform=ts})
 
 data Data = UrlData { url :: String, format :: Maybe DataFormat }
 
@@ -245,7 +260,8 @@ markColor c = over Encoding (\vp -> vp {color=Just c})
 --markColumn :: FacetFieldDef -> Encoding -> Encoding
 --markRow :: FacetFieldDef -> Encoding -> Encoding
 --markDetail :: FieldDef -> Encoding -> Encoding
---markOpacity :: CondMarkProp -> Encoding -> Encoding
+markOpacity :: CondMarkProp -> Encoding -> Encoding
+markOpacity o = over Encoding (\vp -> vp {opacity=Just o})
 --markOrder :: SortSpec -> Encoding -> Encoding
 --markShape :: CondMarkProp -> Encoding -> Encoding
 markSize :: CondMarkProp -> Encoding -> Encoding
@@ -259,6 +275,7 @@ markY d = over Encoding (\vp -> vp {y=Just d})
 --markX2 :: FieldDef -> Encoding -> Encoding
 --markY2 :: FieldDef -> Encoding -> Encoding
 
+-- Handles both CondMarkPropField and CondMarkPropValue
 data CondMarkProp 
   = CondMarkPropField
       { aggregate :: Maybe Aggregate
@@ -272,12 +289,15 @@ data CondMarkProp
       , type :: DataType
       }
   | CondMarkPropValue
-      { condition :: Array Condition
+      { condition :: Array ConditionalValue
       , value :: Value 
       }
 
-condMarkPropValue :: Value -> CondMarkProp
-condMarkPropValue v = CondMarkPropValue {condition:[], value: v}
+condMarkPropValue :: Array ConditionalValue -> Value -> CondMarkProp
+condMarkPropValue cs v = CondMarkPropValue {condition:cs, value: v}
+
+markPropValue :: Value -> CondMarkProp
+markPropValue v = CondMarkPropValue {condition:[], value: v}
 
 instance encodeCondMarkProp :: EncodeJson CondMarkProp where
   encodeJson (CondMarkPropField md)
@@ -292,7 +312,7 @@ instance encodeCondMarkProp :: EncodeJson CondMarkProp where
      $ "type" := md.type
     ~> jsonEmptyObject
   encodeJson (CondMarkPropValue md)
-     = arrayRecord "condition" md.condition
+     = arrayOr1Record "condition" md.condition
      $ "value" := md.value
     ~> jsonEmptyObject
 
@@ -324,12 +344,45 @@ genCondMarkPropField = do
 
 genCondMarkPropValue :: forall m. MonadRec m => MonadGen m => m CondMarkProp
 genCondMarkPropValue = do
-  c <- genArray genCondition
+  c <- genArray genConditionalValue
   v <- genValue
   pure $ CondMarkPropValue
     { condition: c
     , value: v
     }
+
+data ConditionalValue
+  = CvPredicate {test :: LogicalOperand, value :: Value}
+  | CvSelection {selection :: SelectionOperand, value :: Value}
+
+instance encodeConditionalValue :: EncodeJson ConditionalValue where
+  encodeJson (CvPredicate p)
+     = "test" := p.test
+    ~> "value" := p.value
+    ~> jsonEmptyObject
+  encodeJson (CvSelection s)
+     = "selection" := s.selection
+    ~> "value" := s.value
+    ~> jsonEmptyObject
+
+genConditionalValue :: forall m. MonadRec m => MonadGen m => m ConditionalValue
+genConditionalValue = choose genCvPredicate genCvSelection
+
+genCvPredicate :: forall m. MonadRec m => MonadGen m => m ConditionalValue
+genCvPredicate = do
+  t <- genLogicalOperand
+  v <- genValue
+  pure $ CvPredicate {test: t, value: v}
+
+genCvSelection :: forall m. MonadRec m => MonadGen m => m ConditionalValue
+genCvSelection = do
+  s <- genSelectionOperand unit
+  v <- genValue
+  pure $ CvSelection {selection: s, value: v}
+
+brushSelectionValue :: Number -> ConditionalValue
+brushSelectionValue v = CvSelection {selection: sel, value: N v}
+  where sel = SelOper "brush"
 
 newtype CondTextDef = CondTextDef
   { aggregate :: Maybe Aggregate
@@ -595,6 +648,16 @@ genAxis = do
     , values: values
     , zIndex: zIndex
     }
+
+data EmptyValue = AllValues | NoValues
+
+instance encodeEmptyValue :: EncodeJson EmptyValue where
+  encodeJson ev = encodeJson $ case ev of
+    AllValues -> "all"
+    NoValues -> "none"
+
+genEmptyValue :: forall m. MonadGen m => m EmptyValue
+genEmptyValue = elements (AllValues :| [NoValues])
 
 data LabelOverlap = AllowOverlap
                   | Parity
@@ -1023,6 +1086,17 @@ genScaleType = elements (LinearScale :|
   , BandScale
   ])
 
+data StringOrBoolean
+  = Str String
+  | Bool Boolean
+
+instance encodeStringOrBoolean :: EncodeJson StringOrBoolean where
+  encodeJson (Str str) = encodeJson str
+  encodeJson (Bool b) = encodeJson b
+
+genStringOrBoolean :: forall m. MonadRec m => MonadGen m => m StringOrBoolean
+genStringOrBoolean = choose (Str <$> genString) (Bool <$> chooseBool)
+
 data BinParams =
     B Boolean
   | P { base :: Maybe Number
@@ -1071,26 +1145,124 @@ instance encodeBinParams :: EncodeJson BinParams where
      $ maybeRecord "steps" p.steps
      $ jsonEmptyObject
 
-data SelectionOperand = NotOper SelectionOperand
-                      | AndOper SelectionOperand
-                      | OrOper SelectionOperand
-                      | Oper String
+data SingleDefChannel = XChannel
+                      | YChannel
+                      | X2Channel
+                      | Y2Channel
+                      | LongitudeChannel
+                      | LatitudeChannel
+                      | Longitude2Channel
+                      | Latitude2Channel
+                      | RowChannel
+                      | ColumnChannel
+                      | ColorChannel
+                      | FillChannel
+                      | StrokeChannel
+                      | SizeChannel
+                      | ShapeChannel
+                      | OpacityChannel
+                      | TextChannel
+                      | TooltipChannel
+                      | HrefChannel
+                      | KeyChannel
+
+instance encodeSingleDefChannel :: EncodeJson SingleDefChannel where
+  encodeJson sdc = encodeJson $ case sdc of
+     XChannel -> "x"
+     YChannel -> "y"
+     X2Channel -> "x2"
+     Y2Channel -> "y2"
+     LongitudeChannel -> "longitude"
+     LatitudeChannel -> "latitude"
+     Longitude2Channel -> "longitude2"
+     Latitude2Channel -> "latitude2"
+     RowChannel -> "row"
+     ColumnChannel -> "column"
+     ColorChannel -> "color"
+     FillChannel -> "fill"
+     StrokeChannel -> "stroke"
+     SizeChannel -> "size"
+     ShapeChannel -> "shape"
+     OpacityChannel -> "opacity"
+     TextChannel -> "text"
+     TooltipChannel -> "tooltip"
+     HrefChannel -> "href"
+     KeyChannel -> "key"
+
+genSingleDefChannel :: forall m. MonadGen m => m SingleDefChannel
+genSingleDefChannel
+  = elements (XChannel :|
+               [ YChannel
+               , X2Channel
+               , Y2Channel
+               , LongitudeChannel
+               , LatitudeChannel
+               , Longitude2Channel
+               , Latitude2Channel
+               , RowChannel
+               , ColumnChannel
+               , ColorChannel
+               , FillChannel
+               , StrokeChannel
+               , SizeChannel
+               , ShapeChannel
+               , OpacityChannel
+               , TextChannel
+               , TooltipChannel
+               , HrefChannel
+               , KeyChannel
+               ])
+
+data SelectionOperand = NotSelOper SelectionOperand
+                      | AndSelOper SelectionOperand
+                      | OrSelOper SelectionOperand
+                      | SelOper String
 
 instance encodeSelectionOperand :: EncodeJson SelectionOperand where
-  encodeJson (Oper s)    = encodeJson s
-  encodeJson (NotOper o) = "not" := o ~> jsonEmptyObject
-  encodeJson (AndOper o) = "and" := o ~> jsonEmptyObject
-  encodeJson (OrOper o)  = "or" := o ~> jsonEmptyObject
+  encodeJson (SelOper s)    = encodeJson s
+  encodeJson (NotSelOper o) = "not" := o ~> jsonEmptyObject
+  encodeJson (AndSelOper o) = "and" := o ~> jsonEmptyObject
+  encodeJson (OrSelOper o)  = "or" := o ~> jsonEmptyObject
 
 -- need an arg to handle the recursive stuff
 genSelectionOperand :: forall m. MonadGen m => Unit -> m SelectionOperand
-genSelectionOperand _ = Oper <$> genString
+genSelectionOperand _ = SelOper <$> genString
 {--genSelectionOperand x = frequency --}
   {--( (Tuple 0.05 (NotOper <$> genSelectionOperand x)) :|--}
   {--[ Tuple 0.05 (AndOper <$> genSelectionOperand x)--}
   {--, Tuple 0.05 (OrOper <$> genSelectionOperand x)--}
   {--, Tuple 0.85 (Oper <$> genString)--}
   {--])--}
+
+data LogicalOperand = NotOper LogicalOperand
+                    | AndOper LogicalOperand
+                    | OrOper  LogicalOperand
+                    | Pred Predicate
+
+instance encodeLogicalOperand :: EncodeJson LogicalOperand where
+  encodeJson (Pred p)    = encodeJson p
+  encodeJson (NotOper o) = "not" := o ~> jsonEmptyObject
+  encodeJson (AndOper o) = "and" := o ~> jsonEmptyObject
+  encodeJson (OrOper o)  = "or" := o ~> jsonEmptyObject
+
+-- TODO: extend
+genLogicalOperand :: forall m. MonadGen m => m LogicalOperand
+genLogicalOperand = Pred <$> genPredicate
+
+-- TODO: There are more types of predicates!
+data Predicate 
+  = Predicate String
+  | SelectionPred SelectionOperand
+
+-- TODO: extend
+genPredicate :: forall m. MonadGen m => m Predicate
+genPredicate = Predicate <$> genString
+
+instance encodePredicate :: EncodeJson Predicate where
+  encodeJson (Predicate p) = encodeJson p
+  encodeJson (SelectionPred p) 
+     = "selection" := p
+    ~> jsonEmptyObject
 
 data SortSpec = OrderSort SortOrder
               | FieldSort SortField
@@ -1131,12 +1303,182 @@ genSortField = do
     }
 
 -- TODO: Fill in
-data Selection = SingleSelection
-               | MultiSelection
-               | IntervalSelection
+data Selection 
+  = SingleSelection
+      { empty :: Maybe EmptyValue
+      , encodings :: Array SingleDefChannel
+      , fields :: Array String
+      , nearest :: Maybe Boolean
+      --, on :: Maybe VgEventStream
+      , resolve :: Maybe SelectionResolution
+      }
+  | MultiSelection
+      { empty :: Maybe EmptyValue
+      , encodings :: Array SingleDefChannel
+      , fields :: Array String
+      , nearest :: Maybe Boolean
+      --, on :: Maybe VgEventStream
+      , resolve :: Maybe SelectionResolution
+      , toggle :: Maybe StringOrBoolean
+      }
+  | IntervalSelection
+      { empty :: Maybe EmptyValue
+      , encodings :: Array SingleDefChannel
+      , mark :: Array BrushConfig
+      --, on :: Maybe VgEventStream
+      , resolve :: Maybe SelectionResolution
+      , translate :: Maybe StringOrBoolean
+      , zoom :: Maybe StringOrBoolean
+      }
 
-genSelection :: forall m. MonadGen m => m Selection
-genSelection = elements (SingleSelection :| [MultiSelection, IntervalSelection])
+intervalSelection :: Array SingleDefChannel -> Selection
+intervalSelection encs = IntervalSelection
+  { empty: Nothing
+  , encodings: encs
+  , mark: []
+  , resolve: Nothing
+  , translate: Nothing
+  , zoom: Nothing
+  }
+
+genSelection :: forall m. MonadRec m => MonadGen m => m Selection
+genSelection = oneOf (genSingleSelection :| [genMultiSelection, genIntervalSelection])
+
+genSingleSelection :: forall m. MonadRec m => MonadGen m => m Selection
+genSingleSelection = do
+  e  <- genMaybe genEmptyValue
+  ec <- genArray genSingleDefChannel
+  f  <- genArray genString
+  n  <- genMaybe chooseBool
+  r  <- genMaybe genSelectionResolution
+  pure $ SingleSelection
+    { empty: e
+    , encodings: ec
+    , fields: f
+    , nearest: n
+    , resolve: r
+    }
+
+genMultiSelection :: forall m. MonadRec m => MonadGen m => m Selection
+genMultiSelection = do
+  e  <- genMaybe genEmptyValue
+  ec <- genArray genSingleDefChannel
+  f  <- genArray genString
+  n  <- genMaybe chooseBool
+  r  <- genMaybe genSelectionResolution
+  t  <- genMaybe genStringOrBoolean
+  pure $ MultiSelection
+    { empty: e
+    , encodings: ec
+    , fields: f
+    , nearest: n
+    , resolve: r
+    , toggle: t
+    }
+
+genIntervalSelection :: forall m. MonadRec m => MonadGen m => m Selection
+genIntervalSelection = do
+  e  <- genMaybe genEmptyValue
+  ec <- genArray genSingleDefChannel
+  m  <- genArray genBrushConfig
+  r  <- genMaybe genSelectionResolution
+  t  <- genMaybe genStringOrBoolean
+  z  <- genMaybe genStringOrBoolean
+  pure $ IntervalSelection
+    { empty: e
+    , encodings: ec
+    , mark: m
+    , resolve: r
+    , translate: t
+    , zoom: z
+    }
+
+instance encodeSelection :: EncodeJson Selection where
+  encodeJson s = "brush" := encSelection s
+              ~> jsonEmptyObject
+
+encSelection :: Selection -> Json
+encSelection (SingleSelection s) 
+   = maybeRecord "empty" s.empty
+   $ arrayRecord "encodings" s.encodings
+   $ arrayRecord "fields" s.fields
+   $ maybeRecord "nearest" s.nearest
+   -- $ maybeRecord "on" s.on
+   $ maybeRecord "resolve" s.resolve
+   $ "type" := "single"
+  ~> jsonEmptyObject
+encSelection (MultiSelection s)
+   = maybeRecord "empty" s.empty
+   $ arrayRecord "encodings" s.encodings
+   $ arrayRecord "fields" s.fields
+   $ maybeRecord "nearest" s.nearest
+   -- $ maybeRecord "on" s.on
+   $ maybeRecord "resolve" s.resolve
+   $ maybeRecord "toggle" s.toggle
+   $ "type" := "multi"
+  ~> jsonEmptyObject
+encSelection (IntervalSelection s)
+   = maybeRecord "empty" s.empty
+   $ arrayRecord "encodings" s.encodings
+   $ arrayRecord "mark" s.mark
+   -- $ maybeRecord "on" s.on
+   $ maybeRecord "resolve" s.resolve
+   $ maybeRecord "translate" s.translate
+   $ maybeRecord "zoom" s.zoom
+   $ "type" := "interval"
+  ~> jsonEmptyObject
+
+data SelectionResolution = Global | Union | Intersect
+
+instance encodeSelectionResolution :: EncodeJson SelectionResolution where
+  encodeJson sr = encodeJson $ case sr of
+    Global -> "global"
+    Union -> "union"
+    Intersect -> "intersect"
+
+genSelectionResolution :: forall m. MonadRec m => MonadGen m => m SelectionResolution
+genSelectionResolution = elements (Global :| [Union, Intersect])
+
+newtype BrushConfig = BrushConfig
+  { fill :: Maybe String
+  , fillOpacity :: Maybe Number
+  , stroke :: Maybe String
+  , strokeDash :: Array Number
+  , strokeDashOffset :: Maybe Number
+  , strokeOpacity :: Maybe Number
+  , strokeWidth :: Maybe Number
+  }
+derive instance newtypeBrushConfig :: Newtype BrushConfig _
+
+instance encodeBrushConfig :: EncodeJson BrushConfig where
+  encodeJson (BrushConfig c)
+     = maybeRecord "fill" c.fill
+     $ maybeRecord "fillOpacity" c.fillOpacity
+     $ maybeRecord "stroke" c.stroke
+     $ arrayRecord "strokeDash" c.strokeDash
+     $ maybeRecord "strokeDashOffset" c.strokeDashOffset
+     $ maybeRecord "strokeOpacity" c.strokeOpacity
+     $ maybeRecord "strokeWidth" c.strokeWidth
+     $ jsonEmptyObject
+
+genBrushConfig :: forall m. MonadRec m => MonadGen m => m BrushConfig
+genBrushConfig = do
+  f   <- genMaybe genString
+  fo  <- genMaybe genNumber
+  s   <- genMaybe genString
+  sd  <- genArray genNumber
+  sdo <- genMaybe genNumber
+  so  <- genMaybe genNumber
+  sw  <- genMaybe genNumber
+  pure $ wrap
+    { fill: f
+    , fillOpacity: fo
+    , stroke: s
+    , strokeDash: sd
+    , strokeDashOffset: sdo
+    , strokeOpacity: so
+    , strokeWidth: sw
+    }
 
 data TimeUnit 
   -- Local multi-time units
@@ -1288,11 +1630,6 @@ instance encodeData :: EncodeJson Data where
      = "url" := d.url
     ~> "format" := d.format
 
-instance encodeSelection :: EncodeJson Selection where
-  encodeJson SingleSelection = jsonEmptyObject
-  encodeJson MultiSelection = jsonEmptyObject
-  encodeJson IntervalSelection = jsonEmptyObject
-
 instance encodeMarkType :: EncodeJson MarkType where
   encodeJson mt = encodeJson $ case mt of
     Area   -> "area"
@@ -1305,4 +1642,182 @@ instance encodeMarkType :: EncodeJson MarkType where
     Rule   -> "rule"
     Circle -> "circle"
     Square -> "square"
+
+data Transform
+  = FilterTransform LogicalOperand
+  | CalculateTransform {as :: String, calculate :: String}
+  | LookupTransform
+      { as :: Array String
+      , default :: Maybe String
+      , from :: LookupData
+      , lookup :: String
+      }
+  | BinTransform
+      { as :: String
+      , bin :: BinParams
+      , field :: String
+      }
+  | TimeUnitTransform
+      { as :: String
+      , field :: String
+      , timeUnit :: TimeUnit
+      }
+  | AggregateTransform
+      { aggregate :: Aggregate
+      , groupBy :: Array String
+      }
+  | WindowTransform
+      { frame :: Array Number
+      , groupBy :: Array String
+      , ignorePeers :: Maybe Boolean
+      , sort :: Array SortField
+      , window :: NonemptyArray Window
+      }
+
+brushFilterTransform :: Transform
+brushFilterTransform = FilterTransform $ Pred (SelectionPred $ SelOper "brush")
+
+instance encodeTransform :: EncodeJson Transform where
+  encodeJson (FilterTransform ft)
+     = "filter" := ft
+    ~> jsonEmptyObject
+  encodeJson (CalculateTransform ct)
+     = "as" := ct.as
+    ~> "calculate" := ct.calculate
+    ~> jsonEmptyObject
+  encodeJson (LookupTransform lt)
+     = arrayRecord "as" lt.as
+     $ maybeRecord "default" lt.default
+     $ "from" := lt.from
+    ~> "lookup" := lt.lookup
+    ~> jsonEmptyObject
+  encodeJson (BinTransform bt)
+     = "as" := bt.as
+    ~> "bin" := bt.bin
+    ~> "field" := bt.field
+    ~> jsonEmptyObject
+  encodeJson (TimeUnitTransform tut)
+     = "as" := tut.as
+    ~> "field" := tut.field
+    ~> "timeUnit" := tut.timeUnit
+    ~> jsonEmptyObject
+  encodeJson (AggregateTransform at)
+     = arrayRecord "groupBy" at.groupBy
+     $ "aggregate" := at.aggregate
+    ~> jsonEmptyObject
+  encodeJson (WindowTransform wt)
+     = maybeRecord "ignorePeers" wt.ignorePeers
+     $ arrayRecord "frame" wt.frame
+     $ arrayRecord "groupBy" wt.groupBy
+     $ arrayRecord "sort" wt.sort
+     $ "window" := wt.window
+    ~> jsonEmptyObject
+
+newtype LookupData = LookupData
+  { data :: Data
+  , fields :: Array String
+  , key :: String
+  }
+derive instance newtypeLookupData :: Newtype LookupData _
+
+instance encodeLookupData :: EncodeJson LookupData where
+  encodeJson (LookupData ld)
+     = arrayRecord "fields" ld.fields
+     $ "data" := ld.data
+    ~> "key" := ld.key
+    ~> jsonEmptyObject
+
+newtype Window = Window
+  { as :: String
+  , field :: Maybe String
+  , op :: Either AggregateOp WindowOp
+  , param :: Maybe Number
+  }
+
+instance encodeWindow :: EncodeJson Window where
+  encodeJson (Window w)
+     = maybeRecord "field" w.field
+     $ maybeRecord "param" w.param
+     $ "as" := w.as
+    ~> "op" := encodeWo w.op
+    ~> jsonEmptyObject
+
+encodeWo (E.Left ao) = encodeJson ao
+encodeWo (E.Right wo) = encodeJson wo
+
+data WindowOp
+  = RowNumber 
+  | Rank
+  | DenseRank
+  | PercentRank
+  | CumeDist
+  | Ntile
+  | Lag
+  | Lead
+  | FirstValue
+  | LastValue
+  | NthValue
+
+instance encodeWindowOp :: EncodeJson WindowOp where
+  encodeJson o = encodeJson $ case o of
+    RowNumber -> "row_number"
+    Rank -> "rank"
+    DenseRank -> "dense_rank"
+    PercentRank -> "percent_rank"
+    CumeDist -> "cume_dist"
+    Ntile -> "ntile"
+    Lag -> "lag"
+    Lead -> "lead"
+    FirstValue -> "first_value"
+    LastValue -> "last_value"
+    NthValue -> "nth_value"
+
+data AggregateOp
+  = ArgMaxAgg
+  | ArgMinAgg
+  | AverageAgg
+  | CountAgg
+  | DistinctAgg
+  | MaxAgg
+  | MinAgg
+  | MeanAgg
+  | MedianAgg
+  | MissingAgg
+  | Q1Agg
+  | Q3Agg
+  | Ci0Agg
+  | Ci1Agg
+  | StdErrAgg
+  | StdEvAgg
+  | StdEvpAgg
+  | SumAgg
+  | ValidAgg
+  | ValuesAgg
+  | VarianceAgg
+  | VariancePAgg
+
+instance encodeAggregateOp :: EncodeJson AggregateOp where
+  encodeJson o = encodeJson $ case o of
+    ArgMaxAgg -> "argmax"
+    ArgMinAgg -> "argmin"
+    AverageAgg -> "average"
+    CountAgg -> "count"
+    DistinctAgg -> "distinct"
+    MaxAgg -> "max"
+    MeanAgg -> "mean"
+    MedianAgg -> "median"
+    MinAgg -> "min"
+    MissingAgg -> "missing"
+    Q1Agg -> "q1"
+    Q3Agg -> "q3"
+    Ci0Agg -> "ci0"
+    Ci1Agg -> "ci1"
+    StdErrAgg -> "stderr"
+    StdEvAgg -> "stdev"
+    StdEvpAgg -> "stdevp"
+    SumAgg -> "sum"
+    ValidAgg -> "valid"
+    ValuesAgg -> "values"
+    VarianceAgg -> "variance"
+    VariancePAgg -> "variancep"
 

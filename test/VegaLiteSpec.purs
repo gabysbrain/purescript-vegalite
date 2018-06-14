@@ -38,11 +38,30 @@ bgWAvg = Layered {data: Just d, layers: layers}
     encoding
   avgEncs = 
     markY     (posAggregate Mean $ posField "precipitation" $ position Quantitative) $
-    markSize  (condMarkPropValue $ intValue 3) $
-    markColor (condMarkPropValue $ strValue "firebrick") $
+    markSize  (markPropValue $ intValue 3) $
+    markColor (markPropValue $ strValue "firebrick") $
     encoding
   barLayer = viewPanel Bar barEncs
   avgLayer = viewPanel Rule avgEncs
+  layers = nea barLayer [avgLayer]
+
+bgWBrush :: View
+bgWBrush = Layered {data: Just d, layers: layers}
+  where
+  d = UrlData {url: "data/seattle-weather.csv", format: Nothing}
+  barEncs = 
+    markX (posTimeUnit Month $ posField "date" $ position Ordinal) $
+    markY (posAggregate Mean $ posField "precipitation" $ position Quantitative) $
+    markOpacity (condMarkPropValue [brushSelectionValue 1.0] (numValue 0.7)) $
+    encoding
+  avgEncs = 
+    markY     (posAggregate Mean $ posField "precipitation" $ position Quantitative) $
+    markSize  (markPropValue $ intValue 3) $
+    markColor (markPropValue $ strValue "firebrick") $
+    encoding
+  sel = intervalSelection [XChannel]
+  barLayer = setSelection sel $ viewPanel Bar barEncs
+  avgLayer = setTransforms [brushFilterTransform] $ viewPanel Rule avgEncs
   layers = nea barLayer [avgLayer]
 
 loadVlSchema :: forall e. Aff (fs::FS,exception::EXCEPTION | e) Json
@@ -70,6 +89,8 @@ spec = describe "VegaLite test cases" do
       compareToFile "bargraph.json" bg
     it "bargraph w/ average spec" do
       compareToFile "bargraph2.json" bgWAvg
+    it "bargraph w/ brush" do
+      compareToFile "bargraph3.json" bgWBrush
   {--describe "Any possible specification" do--}
     {--it "should validate against vega-lite's schema" do--}
       {--schema <- loadVlSchema--}
