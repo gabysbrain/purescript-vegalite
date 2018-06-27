@@ -9,7 +9,9 @@
     "watch-test": "pulp -w test",
     "build": "pulp build",
     "watch": "pulp -w build",
-    "start": "pulp -w server"
+    "start": "pulp -w server",
+    "buildDemo": "pulp browserify --main VegaLiteDemo --to app.js",
+    "demo": "pulp server --main VegaLiteDemo"
   },
   "repository": {
     "type": "git",
