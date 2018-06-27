@@ -9,11 +9,21 @@ import Control.Monad.Rec.Class (class MonadRec)
 import Data.Array as A
 import Data.Int as I
 import Data.Either as E
+import Data.Function.Uncurried (Fn2, runFn2)
 import Data.NonEmpty (NonEmpty, (:|))
 import Data.Newtype (over)
 import Data.Argonaut (Json, class EncodeJson, encodeJson, 
                       jsonEmptyObject, (:=), (~>))
 import Test.QuickCheck (class Arbitrary, arbitrary)
+
+foreign import embedView_ :: Fn2 String Json Unit
+
+-- embed a vega lite specification in a webpage
+embedView :: String -> View -> Unit
+embedView el = embedView' el <<< encodeJson
+
+embedView' :: String -> Json -> Unit
+embedView' = runFn2 embedView_
 
 -- json version of the vega-lite specification
 

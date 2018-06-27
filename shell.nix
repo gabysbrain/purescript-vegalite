@@ -18,6 +18,9 @@ stdenv.mkDerivation {
   buildInputs = [
     purescript
     nodejs
+    python
+    pkgconfig
+    cairo
     nodePackages.bower
     extraNodePkgs.pulp
   ];
