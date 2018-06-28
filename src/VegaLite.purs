@@ -1752,6 +1752,7 @@ instance encodeWindow :: EncodeJson Window where
     ~> "op" := encodeWo w.op
     ~> jsonEmptyObject
 
+encodeWo :: forall a b. EncodeJson a => EncodeJson b => Either a b -> Json
 encodeWo (E.Left ao) = encodeJson ao
 encodeWo (E.Right wo) = encodeJson wo
 
