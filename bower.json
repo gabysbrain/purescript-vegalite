@@ -15,7 +15,8 @@
     "purescript-lists": "^4.12.0",
     "purescript-transformers": "^3.5.0",
     "purescript-nonempty": "^4.1.1",
-    "purescript-argonaut": "^3.1.0"
+    "purescript-argonaut": "^3.1.0",
+    "purescript-quickcheck": "^4.6.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
