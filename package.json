@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "bower": "*",
-    "purescript": "^0.12.0"
+    "purescript": "^0.11.7"
   },
   "directories": {
     "test": "test"
