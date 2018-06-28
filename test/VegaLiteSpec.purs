@@ -1,6 +1,6 @@
 module Test.VegaLiteSpec where
 
-import MyPrelude
+import VegaLitePrelude
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Exception (EXCEPTION, throw)

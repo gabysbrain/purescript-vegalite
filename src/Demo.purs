@@ -1,6 +1,6 @@
 module VegaLiteDemo where
 
-import MyPrelude
+import VegaLitePrelude
 import Control.Monad.Eff (Eff)
 import VegaLite
 

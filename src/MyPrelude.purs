@@ -1,4 +1,4 @@
-module MyPrelude 
+module VegaLitePrelude 
  ( module Control.Applicative
   , module Control.Apply
   , module Control.Bind

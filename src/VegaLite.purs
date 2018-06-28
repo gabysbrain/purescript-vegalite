@@ -1,6 +1,6 @@
 module VegaLite where
 
-import MyPrelude
+import VegaLitePrelude
 import Control.Monad.Gen ( class MonadGen
                          , elements, choose, oneOf, frequency, unfoldable
                          , chooseBool, chooseFloat, chooseInt )
