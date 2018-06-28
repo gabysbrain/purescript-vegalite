@@ -29,10 +29,7 @@
   },
   "dependencies": {
     "bower": "*",
-    "purescript": "^0.12.0",
-    "vega": "^3.3.1",
-    "vega-embed": "^3.15.0",
-    "vega-lite": "^2.5.2"
+    "purescript": "^0.12.0"
   },
   "directories": {
     "test": "test"
